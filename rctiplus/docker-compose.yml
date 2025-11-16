@@ -1,0 +1,152 @@
+version: '3.8'
+
+services:
+  # Demo Golang App
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
+      - OTEL_SERVICE_NAME=rctiplus-api
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=rctiplus-api,environment=demo
+    depends_on:
+      - alloy
+      - user-profile-service
+    networks:
+      - rctiplus-network
+
+  # User Profile Service - to demonstrate service tree
+  user-profile-service:
+    build:
+      context: ./user-profile-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
+      - OTEL_SERVICE_NAME=user-profile-service
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=user-profile-service,environment=demo
+    depends_on:
+      - alloy
+    networks:
+      - rctiplus-network
+
+  # Grafana Alloy - Collector for traces, metrics, and logs
+  alloy:
+    image: grafana/alloy:latest
+    ports:
+      - "12345:12345"  # Alloy UI
+      - "4316:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    volumes:
+      - ./infrastructure/alloy/config.alloy:/etc/alloy/config.alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    networks:
+      - rctiplus-network
+
+  # Tempo - Traces backend
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200"   # Tempo
+      - "4319:4317"   # OTLP gRPC (exposed for debugging)
+    volumes:
+      - ./infrastructure/tempo/tempo.yaml:/etc/tempo/tempo.yaml
+      - tempo-data:/var/tempo
+    command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+    networks:
+      - rctiplus-network
+
+  # Mimir - Metrics backend (alternative: Prometheus)
+  mimir:
+    image: grafana/mimir:latest
+    ports:
+      - "9009:9009"
+    volumes:
+      - ./infrastructure/mimir/mimir.yaml:/etc/mimir/mimir.yaml
+      - mimir-data:/data
+    command: [ "-config.file=/etc/mimir/mimir.yaml" ]
+    networks:
+      - rctiplus-network
+
+  # Prometheus - Alternative metrics backend (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/mimir/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-remote-write-receiver'
+    networks:
+      - rctiplus-network
+
+  # Loki - Logs backend
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infrastructure/loki/loki.yaml:/etc/loki/loki.yaml
+      - loki-data:/loki
+    command: [ "-config.file=/etc/loki/loki.yaml" ]
+    networks:
+      - rctiplus-network
+
+  # Jaeger - Alternative trace backend
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # HTTP collector
+      - "14250:14250"  # OTLP gRPC receiver
+      - "4317:4317"    # OTLP gRPC (alternative)
+      - "6831:6831/udp"    # UDP receiver (legacy)
+      - "6832:6832/udp"    # UDP receiver (legacy)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - rctiplus-network
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    volumes:
+      - ./infrastructure/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./infrastructure/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - tempo
+      - mimir
+      - prometheus
+      - loki
+    networks:
+      - rctiplus-network
+
+networks:
+  rctiplus-network:
+    driver: bridge
+
+volumes:
+  tempo-data:
+  mimir-data:
+  prometheus-data:
+  loki-data:
+  grafana-data:

@@ -1,0 +1,169 @@
+// Grafana Alloy Configuration
+// This configuration collects traces, metrics, and logs from applications
+// and forwards them to Tempo, Prometheus, and Loki respectively
+
+// ==================
+// OTLP Receiver - Receives telemetry from applications
+// ==================
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+    traces  = [otelcol.processor.batch.default.input]
+  }
+}
+
+// ==================
+// Batch Processor - Batches telemetry for efficiency
+// ==================
+otelcol.processor.batch "default" {
+  output {
+    metrics = [otelcol.processor.attributes.default.input]
+    logs    = [otelcol.processor.attributes.default.input]
+    traces  = [otelcol.processor.attributes.default.input]
+  }
+}
+
+// ==================
+// Attributes Processor - Adds resource attributes
+// ==================
+otelcol.processor.attributes "default" {
+  action {
+    key    = "cluster"
+    value  = "alloy-demo"
+    action = "insert"
+  }
+
+  output {
+    metrics = [
+      otelcol.exporter.prometheus.default.input,
+    ]
+    logs    = [otelcol.exporter.loki.default.input]
+    traces  = [
+      otelcol.connector.spanmetrics.default.input,
+      otelcol.exporter.otlp.tempo.input,
+    ]
+  }
+}
+
+// ==================
+// Span Metrics Connector - Generates service graph metrics from traces
+// ==================
+otelcol.connector.spanmetrics "default" {
+  // Histogram buckets for latency metrics
+  histogram {
+    explicit {
+      buckets = [
+        0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 
+        1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0,
+      ]
+    }
+  }
+
+  // Dimensions to include in metrics
+  dimensions {
+    name = "http.method"
+  }
+  dimensions {
+    name = "http.status_code"
+  }
+  dimensions {
+    name = "http.route"
+  }
+  dimensions {
+    name = "service.version"
+  }
+
+  // Enable service graph metrics for visualization
+  dimensions_cache_size = 10000
+  aggregation_temporality = "CUMULATIVE"
+
+  output {
+    metrics = [otelcol.exporter.prometheus.default.input]
+  }
+}
+
+// ==================
+// Service Graph Connector - Generates service graph from traces
+// ==================
+otelcol.connector.servicegraph "default" {
+  latency_histogram_buckets = [
+    0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5,
+    1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0,
+  ]
+
+  dimensions = [
+    "http.method",
+    "http.status_code",
+  ]
+
+  store {
+    ttl = "2s"
+    max_items = 10000
+  }
+
+  output {
+    metrics = [otelcol.exporter.prometheus.default.input]
+  }
+}
+
+// ==================
+// Prometheus Exporter - Sends metrics to Prometheus
+// ==================
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+    
+    queue_config {
+      capacity = 10000
+      max_shards = 10
+    }
+  }
+}
+
+// ==================
+// Tempo Exporter - Sends traces to Tempo
+// ==================
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// ==================
+// Loki Exporter - Sends logs to Loki
+// ==================
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ==================
+// Self-monitoring - Monitor Alloy itself
+// ==================
+prometheus.exporter.self "alloy" { }
+
+prometheus.scrape "alloy" {
+  targets    = prometheus.exporter.self.alloy.targets
+  forward_to = [prometheus.remote_write.default.receiver]
+}

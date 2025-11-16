@@ -1,0 +1,246 @@
+version: '3.8'
+
+networks:
+  alloy-demo:
+    driver: bridge
+
+volumes:
+  tempo-data:
+  loki-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+  # ==================
+  # Application Services (Golang)
+  # ==================
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
+      - OTEL_SERVICE_NAME=frontend
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=alloy-demo,deployment.environment=production
+      - BACKEND_URL=http://backend:8081
+      - PAYMENT_URL=http://payment:8082
+    depends_on:
+      - alloy
+      - backend
+      - payment
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+    pid: "host"  # Required for Beyla eBPF to attach to process
+
+  # Beyla sidecar for frontend - zero-code instrumentation
+  beyla-frontend:
+    image: grafana/beyla:latest
+    container_name: beyla-frontend
+    privileged: true  # Required for eBPF
+    pid: "service:frontend"  # Share PID namespace with frontend
+    network_mode: "service:frontend"  # Share network namespace
+    volumes:
+      - ./config/beyla/beyla-frontend.yml:/etc/beyla/config.yml
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+    environment:
+      - BEYLA_CONFIG_PATH=/etc/beyla/config.yml
+      - BEYLA_OPEN_PORT=8080
+      - BEYLA_SERVICE_NAMESPACE=alloy-demo
+      - BEYLA_SERVICE_NAME=frontend-beyla
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+    depends_on:
+      - frontend
+      - alloy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: backend
+    ports:
+      - "8081:8081"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
+      - OTEL_SERVICE_NAME=backend
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=alloy-demo,deployment.environment=production
+      - PAYMENT_URL=http://payment:8082
+    depends_on:
+      - alloy
+      - payment
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+    pid: "host"  # Required for Beyla eBPF
+
+  # Beyla sidecar for backend - zero-code instrumentation
+  beyla-backend:
+    image: grafana/beyla:latest
+    container_name: beyla-backend
+    privileged: true  # Required for eBPF
+    pid: "service:backend"  # Share PID namespace with backend
+    network_mode: "service:backend"  # Share network namespace
+    volumes:
+      - ./config/beyla/beyla-backend.yml:/etc/beyla/config.yml
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+    environment:
+      - BEYLA_CONFIG_PATH=/etc/beyla/config.yml
+      - BEYLA_OPEN_PORT=8081
+      - BEYLA_SERVICE_NAMESPACE=alloy-demo
+      - BEYLA_SERVICE_NAME=backend-beyla
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+    depends_on:
+      - backend
+      - alloy
+    restart: unless-stopped
+
+  payment:
+    build:
+      context: ./apps/payment
+      dockerfile: Dockerfile
+    container_name: payment
+    ports:
+      - "8082:8082"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4317
+      - OTEL_SERVICE_NAME=payment
+      - OTEL_RESOURCE_ATTRIBUTES=service.namespace=alloy-demo,deployment.environment=production
+    depends_on:
+      - alloy
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+    pid: "host"  # Required for Beyla eBPF
+
+  # Beyla sidecar for payment - zero-code instrumentation
+  beyla-payment:
+    image: grafana/beyla:latest
+    container_name: beyla-payment
+    privileged: true  # Required for eBPF
+    pid: "service:payment"  # Share PID namespace with payment
+    network_mode: "service:payment"  # Share network namespace
+    volumes:
+      - ./config/beyla/beyla-payment.yml:/etc/beyla/config.yml
+      - /sys/kernel/debug:/sys/kernel/debug:ro
+    environment:
+      - BEYLA_CONFIG_PATH=/etc/beyla/config.yml
+      - BEYLA_OPEN_PORT=8082
+      - BEYLA_SERVICE_NAMESPACE=alloy-demo
+      - BEYLA_SERVICE_NAME=payment-beyla
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+    depends_on:
+      - payment
+      - alloy
+    restart: unless-stopped
+
+  # ==================
+  # Grafana Alloy (Collector)
+  # ==================
+  alloy:
+    image: grafana/alloy:latest
+    container_name: alloy
+    ports:
+      - "12345:12345"  # Alloy UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    volumes:
+      - ./config/alloy/config.alloy:/etc/alloy/config.alloy
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+    depends_on:
+      - tempo
+      - loki
+      - prometheus
+
+  # ==================
+  # Tempo (Traces)
+  # ==================
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP
+      - "4317"        # OTLP gRPC receiver
+      - "4318"        # OTLP HTTP receiver
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+
+  # ==================
+  # Loki (Logs)
+  # ==================
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./config/loki.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+
+  # ==================
+  # Prometheus (Metrics)
+  # ==================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--enable-feature=exemplar-storage'
+      - '--enable-feature=native-histograms'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+
+  # ==================
+  # Grafana (Visualization)
+  # ==================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor,correlations
+      - GF_INSTALL_PLUGINS=grafana-pyroscope-datasource
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - alloy-demo
+    restart: unless-stopped
+    depends_on:
+      - tempo
+      - loki
+      - prometheus

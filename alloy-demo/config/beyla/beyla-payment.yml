@@ -1,0 +1,55 @@
+# Grafana Beyla Configuration for Payment Service
+# Zero-code instrumentation using eBPF
+
+# OTEL exporter configuration
+otel_metrics_export:
+  endpoint: http://alloy:4318
+  protocol: http/protobuf
+  interval: 10s
+
+otel_traces_export:
+  endpoint: http://alloy:4318
+  protocol: http/protobuf
+
+# Service discovery - auto-detect the payment application
+discovery:
+  services:
+    - name: payment
+      namespace: alloy-demo
+      open_port: 8082
+
+# Attributes to add to all telemetry
+attributes:
+  instance_id:
+    kubernetes:
+      pod_name: payment
+  service:
+    name: payment-beyla
+    namespace: alloy-demo
+
+# Network configuration
+network:
+  enable: true
+  allowed_attributes:
+    - src.address
+    - dst.address
+    - src.port
+    - dst.port
+    - src.name
+    - dst.name
+
+# Application-level instrumentation
+routes:
+  unmatch: heuristic
+  patterns:
+    - /api/payment
+    - /api/pricing
+    - /health
+
+# Logging configuration
+log_level: info
+
+# Prometheus metrics
+prometheus_export:
+  port: 9402
+  path: /metrics

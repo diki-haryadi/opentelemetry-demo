@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rctiplus-app
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rctiplus-app
+  template:
+    metadata:
+      labels:
+        app: rctiplus-app
+    spec:
+      containers:
+      - name: app
+        image: rctiplus-app:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://alloy:4317"
+        - name: OTEL_SERVICE_NAME
+          value: "rctiplus-api"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=rctiplus-api,environment=demo"

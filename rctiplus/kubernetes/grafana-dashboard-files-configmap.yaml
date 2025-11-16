@@ -1,0 +1,237 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-files
+  namespace: {{ .Values.namespace }}
+data:
+  service-tree.json: |
+    {
+      "title": "Service Graph Dashboard",
+      "tags": ["services", "service-graph", "topology"],
+      "timezone": "browser",
+      "refresh": "10s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Service Map (Tempo)",
+          "type": "nodeGraph",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [{
+            "queryType": "serviceMap",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+          "options": {
+            "edges": {
+              "mainStatUnit": "short"
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Service Graph Request Rate",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(tempo_service_graph_request_total[5m])) by (client, server)",
+              "legendFormat": "{{client}} -> {{server}}",
+              "refId": "A"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": {
+                "axisLabel": "Requests/sec"
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Service Graph Latency (p95)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(tempo_service_graph_request_server_seconds_bucket[5m])) by (le, client, server))",
+              "legendFormat": "{{client}} -> {{server}}",
+              "refId": "A"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "axisLabel": "Latency (p95)"
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Service Request Rate",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [{
+            "expr": "sum(rate(tempo_service_graph_request_total[5m])) by (service)",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 18},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Service Error Rate",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [{
+            "expr": "sum(rate(tempo_service_graph_request_failed_total[5m])) by (service) / sum(rate(tempo_service_graph_request_total[5m])) by (service)",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 18},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            }
+          }
+        },
+        {
+          "id": 6,
+          "title": "Service Graph Duration (p99)",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [{
+            "expr": "histogram_quantile(0.99, sum(rate(tempo_service_graph_request_server_seconds_bucket[5m])) by (le, service))",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 18},
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            }
+          }
+        }
+      ]
+    }
+  infrastructure.json: |
+    {
+      "title": "Infrastructure (Production)",
+      "tags": ["production", "infra"],
+      "panels": [
+        {
+          "title": "CPU Usage",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "sum(rate(container_cpu_usage_seconds_total[1m])) by (container_name)",
+            "legendFormat": "{{container_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        },
+        {
+          "title": "Memory Usage",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "container_memory_usage_bytes",
+            "legendFormat": "{{container_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        },
+        {
+          "title": "Network Traffic",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "rate(container_network_receive_bytes_total[1m])",
+            "legendFormat": "{{container_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        },
+        {
+          "title": "Disk I/O",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "rate(container_fs_reads_bytes_total[1m])",
+            "legendFormat": "{{container_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+        }
+      ]
+    }
+  red-metrics.json: |
+    {
+      "title": "RED Metrics (Production)",
+      "tags": ["production", "metrics"],
+      "panels": [
+        {
+          "title": "Request Rate",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "sum(rate(http_server_request_count[1m])) by (service_name)",
+            "legendFormat": "{{service_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0}
+        },
+        {
+          "title": "Error Rate",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "sum(rate(http_server_request_count{http_status_code=~\"500\"}[1m])) by (service_name) / sum(rate(http_server_request_count[1m])) by (service_name)",
+            "legendFormat": "{{service_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+        },
+        {
+          "title": "Duration (p95)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket[1m])) by (le, service_name))",
+            "legendFormat": "{{service_name}}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+        }
+      ]
+    }
+

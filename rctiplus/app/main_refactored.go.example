@@ -1,0 +1,184 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"math/rand"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/rctiplus/otel-lib"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+var telemetry *otellib.Telemetry
+
+// ... (UserProfile, User, UserWithProfile, Product, Response structs tetap sama)
+// ... (users, products in-memory storage tetap sama)
+
+func main() {
+	ctx := context.Background()
+
+	// Initialize OpenTelemetry dengan library baru
+	var err error
+	telemetry, err = otellib.NewBuilder().
+		WithConfig(otellib.DefaultConfig().
+			WithServiceName("rctiplus-api").
+			WithServiceVersion("1.0.0").
+			WithEnvironment("demo")).
+		Build(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize OpenTelemetry: %v", err)
+	}
+	defer func() {
+		if err := telemetry.Shutdown(ctx); err != nil {
+			log.Printf("Error shutting down OpenTelemetry: %v", err)
+		}
+	}()
+
+	// Initialize sample data
+	initSampleData()
+
+	// Create router
+	mux := http.NewServeMux()
+
+	// Register routes
+	mux.HandleFunc("/", handleHome)
+	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/api/users", handleUsers)
+	mux.HandleFunc("/api/users/", handleUserByID)
+	mux.HandleFunc("/api/users-with-profile/", handleUserWithProfileByID)
+	mux.HandleFunc("/api/products", handleProducts)
+	mux.HandleFunc("/api/products/", handleProductByID)
+	mux.HandleFunc("/api/orders", handleOrders)
+
+	// Wrap with OpenTelemetry middleware menggunakan library
+	handler := telemetry.HTTPMiddleware(mux, "rctiplus-api")
+
+	// Start server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("🚀 RCTI Plus API Server starting on port %s", port)
+	log.Printf("📊 OpenTelemetry enabled - Sending to %s", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
+}
+
+func handleHome(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	telemetry.SetSpanAttributes(ctx, attribute.String("endpoint", "home"))
+	telemetry.RecordMetrics(ctx, "GET", "/", 200)
+
+	response := Response{
+		Success: true,
+		Message: "Welcome to RCTI Plus API",
+		Data: map[string]interface{}{
+			"version": "1.0.0",
+		},
+	}
+	respondJSON(w, http.StatusOK, response)
+}
+
+func handleUsers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx, span := telemetry.StartSpan(ctx, "handleUsers")
+	defer span.End()
+
+	telemetry.SetSpanAttributes(ctx,
+		attribute.String("endpoint", "users"),
+		attribute.String("method", r.Method),
+	)
+
+	simulateWork(ctx, 50, 150)
+
+	userList := make([]*User, 0, len(users))
+	for _, user := range users {
+		userList = append(userList, user)
+	}
+
+	telemetry.SetSpanAttributes(ctx, attribute.Int("users.count", len(userList)))
+	telemetry.RecordMetrics(ctx, r.Method, "/api/users", 200)
+
+	response := Response{
+		Success: true,
+		Data:    userList,
+	}
+	respondJSON(w, http.StatusOK, response)
+}
+
+func getUserProfile(ctx context.Context, userID int) (*UserProfile, error) {
+	ctx, span := telemetry.StartSpan(ctx, "getUserProfile")
+	defer span.End()
+
+	telemetry.SetSpanAttributes(ctx,
+		attribute.String("http.method", "GET"),
+		attribute.String("http.url", fmt.Sprintf("http://user-profile-service:8081/api/user-profiles/%d", userID)),
+		attribute.Int("user.id", userID),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", 
+		fmt.Sprintf("http://user-profile-service:8081/api/user-profiles/%d", userID), nil)
+	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
+		return nil, err
+	}
+
+	// Gunakan HTTP client dari library
+	client := telemetry.HTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	telemetry.SetSpanAttributes(ctx, attribute.String("peer.service", "user-profile-service"))
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		err := fmt.Errorf("user profile service returned status: %d", resp.StatusCode)
+		telemetry.RecordSpanError(ctx, err)
+		return nil, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
+		return nil, err
+	}
+
+	var userProfileResponse Response
+	if err := json.Unmarshal(body, &userProfileResponse); err != nil {
+		telemetry.RecordSpanError(ctx, err)
+		return nil, err
+	}
+
+	if userProfile, ok := userProfileResponse.Data.(*UserProfile); ok {
+		return userProfile, nil
+	}
+
+	return nil, nil
+}
+
+func simulateWork(ctx context.Context, minMs, maxMs int) {
+	_, span := telemetry.StartSpan(ctx, "simulateWork")
+	defer span.End()
+
+	duration := time.Duration(rand.Intn(maxMs-minMs)+minMs) * time.Millisecond
+	telemetry.SetSpanAttributes(ctx, attribute.Int64("delay.ms", duration.Milliseconds()))
+	time.Sleep(duration)
+}
+
+// ... (functions lainnya tetap sama, hanya ganti penggunaan telemetry)
+

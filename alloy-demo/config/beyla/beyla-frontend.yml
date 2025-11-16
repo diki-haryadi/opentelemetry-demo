@@ -1,0 +1,55 @@
+# Grafana Beyla Configuration for Frontend Service
+# Zero-code instrumentation using eBPF
+
+# OTEL exporter configuration
+otel_metrics_export:
+  endpoint: http://alloy:4318
+  protocol: http/protobuf
+  interval: 10s
+
+otel_traces_export:
+  endpoint: http://alloy:4318
+  protocol: http/protobuf
+
+# Service discovery - auto-detect the frontend application
+discovery:
+  services:
+    - name: frontend
+      namespace: alloy-demo
+      open_port: 8080
+
+# Attributes to add to all telemetry
+attributes:
+  instance_id:
+    kubernetes:
+      pod_name: frontend
+  service:
+    name: frontend-beyla
+    namespace: alloy-demo
+
+# Network configuration
+network:
+  enable: true
+  allowed_attributes:
+    - src.address
+    - dst.address
+    - src.port
+    - dst.port
+    - src.name
+    - dst.name
+
+# Application-level instrumentation
+routes:
+  unmatch: heuristic
+  patterns:
+    - /
+    - /products
+    - /checkout
+
+# Logging configuration
+log_level: info
+
+# Prometheus metrics (optional, if you want to scrape Beyla metrics directly)
+prometheus_export:
+  port: 9400
+  path: /metrics

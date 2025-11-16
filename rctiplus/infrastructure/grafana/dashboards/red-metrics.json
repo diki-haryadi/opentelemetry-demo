@@ -1,0 +1,39 @@
+{
+  "title": "RED Metrics (Production)",
+  "tags": ["production", "metrics"],
+  "panels": [
+    {
+      "title": "Request Rate",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [{
+        "expr": "sum(rate(http_server_request_count[1m])) by (service_name)",
+        "legendFormat": "{{service_name}}",
+        "refId": "A"
+      }],
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0}
+    },
+    {
+      "title": "Error Rate",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [{
+        "expr": "sum(rate(http_server_request_count{http_status_code=~\"500\"}[1m])) by (service_name) / sum(rate(http_server_request_count[1m])) by (service_name)",
+        "legendFormat": "{{service_name}}",
+        "refId": "A"
+      }],
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+    },
+    {
+      "title": "Duration (p95)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket[1m])) by (le, service_name))",
+        "legendFormat": "{{service_name}}",
+        "refId": "A"
+      }],
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+    }
+  ]
+}

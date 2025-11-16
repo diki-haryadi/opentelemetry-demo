@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:latest
+        ports:
+        - containerPort: 16686
+          name: ui
+        - containerPort: 14268
+          name: http-collector
+        - containerPort: 14250
+          name: otlp-grpc
+        - containerPort: 4317
+          name: otlp-grpc-alt
+        - containerPort: 6831
+          name: udp-legacy
+          protocol: UDP
+        - containerPort: 6832
+          name: udp-legacy-alt
+          protocol: UDP
+        env:
+        - name: COLLECTOR_OTLP_ENABLED
+          value: "true"
+

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: loki
+  ports:
+  - name: http
+    protocol: TCP
+    port: 3100
+    targetPort: 3100
+  type: ClusterIP
+
