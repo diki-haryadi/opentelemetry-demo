@@ -4,11 +4,11 @@ import com.google.protobuf.gradle.*
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("jvm") version "2.2.21"
+    kotlin("jvm") version "2.3.0"
     application
     id("java")
     id("idea")
-    id("com.google.protobuf") version "0.9.5"
+    id("com.google.protobuf") version "0.9.6"
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
@@ -32,7 +32,7 @@ dependencies {
     testImplementation(kotlin("test"))
     implementation(kotlin("script-runtime"))
     implementation("org.apache.kafka:kafka-clients:4.1.0")
-    implementation("com.google.api.grpc:proto-google-common-protos:2.62.0")
+    implementation("com.google.api.grpc:proto-google-common-protos:2.63.2")
     implementation("io.grpc:grpc-protobuf:${grpcVersion}")
     implementation("io.grpc:grpc-stub:${grpcVersion}")
     implementation("io.grpc:grpc-netty:${grpcVersion}")
